@@ -42,6 +42,35 @@ Read from environment variables or `back/.env` (git-ignored).
 | `CORS_ORIGINS`            | `http://localhost:5173` | Comma-separated frontend origins.         |
 | `REQUEST_TIMEOUT_SECONDS` | `60`                    | Timeout for one Claude request.           |
 
+## Deploy (Vercel)
+
+Two Vercel projects in the `dorhsis-projects` scope, one per folder:
+
+| Folder   | Vercel project | Production URL                      | Env vars (Production)                    |
+| -------- | -------------- | ----------------------------------- | ---------------------------------------- |
+| `back/`  | `sdgbilim-api` | https://sdgbilim-api.vercel.app     | `ANTHROPIC_API_KEY`, `CORS_ORIGINS`      |
+| `front/` | `sdgbilim`     | https://sdgbilim.vercel.app         | `VITE_API_URL=https://sdgbilim-api.vercel.app` |
+
+`vercel.json` in each folder pins the framework (`fastapi`, `vite`); `front/vercel.json` also
+sends every path to `index.html` so links like `/tutor` work. `.vercelignore` keeps `.env` files
+and tests out of the upload.
+
+Deploy from the folder you changed:
+
+```bash
+cd back && npx vercel@latest deploy --prod
+cd front && npx vercel@latest deploy --prod
+```
+
+The API key is set once in Vercel, never committed:
+
+```bash
+cd back && npx vercel@latest env add ANTHROPIC_API_KEY production
+```
+
+Env var changes apply on the next deploy. If the frontend moves to another domain, update
+`CORS_ORIGINS` in `sdgbilim-api`.
+
 ## API
 
 The contract with request/response examples is in [`front/README.md`](../front/README.md#api-contract-for-the-backend);

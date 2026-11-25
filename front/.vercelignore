@@ -1,0 +1,6 @@
+# Local env files must not reach the build: production values come from Vercel env vars.
+.env.local
+.env.*.local
+node_modules/
+dist/
+.vercel/

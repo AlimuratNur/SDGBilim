@@ -1,0 +1,10 @@
+# Not needed in the deployed function. .env must never be uploaded: set secrets in Vercel.
+.env
+.venv/
+tests/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.env.local
+.vercel/
