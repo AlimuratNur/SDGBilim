@@ -43,6 +43,17 @@ export function Translate() {
     }
   }
 
+  // The backend rejects equal languages, so picking the other side's language swaps them.
+  function pickFrom(lang: Lang) {
+    if (lang === to) setTo(from)
+    setFrom(lang)
+  }
+
+  function pickTo(lang: Lang) {
+    if (lang === from) setFrom(to)
+    setTo(lang)
+  }
+
   function insertLetter(letter: string) {
     const el = inputRef.current
     const { value, caret } = insertAtCaret(el, text, letter)
@@ -52,54 +63,59 @@ export function Translate() {
 
   return (
     <div className="container translate">
-      <h1 className="page-title">Translator · Аудармашы</h1>
-      <p className="section-sub left">Kazakh ⇄ English ⇄ Russian, with transliteration and usage notes from the AI.</p>
+      <h1 className="page-title">
+        Translator <span lang="kk">· Аудармашы</span>
+      </h1>
+      <p className="section-lead">Kazakh, English and Russian, with the Latin spelling and a usage note when it helps.</p>
 
       <form className="panel translate-panel" onSubmit={onSubmit}>
         <div className="lang-bar">
-          <select value={from} onChange={(e) => setFrom(e.target.value as Lang)} aria-label="From language">
-            {langs.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.label}
-              </option>
-            ))}
-          </select>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={swap} aria-label="Swap languages">
-            ⇄
+          <LangPicker label="From" value={from} onChange={pickFrom} />
+          <button type="button" className="swap" onClick={swap} aria-label="Swap languages">
+            <span aria-hidden="true">⇄</span>
           </button>
-          <select value={to} onChange={(e) => setTo(e.target.value as Lang)} aria-label="To language">
-            {langs.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.label}
-              </option>
-            ))}
-          </select>
+          <LangPicker label="To" value={to} onChange={pickTo} />
         </div>
 
         <div className="translate-grid">
-          <div>
+          <div className="translate-in">
             <textarea
               ref={inputRef}
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder="Type a word or sentence…"
+              aria-label="Text to translate"
+              placeholder="Type a word or a sentence"
               rows={6}
             />
             {from === 'kk' && <KazakhKeyboard onInsert={insertLetter} />}
           </div>
           <div className="translate-out" aria-live="polite">
             {loading ? (
-              <span className="muted">Translating…</span>
+              <p className="empty">Translating…</p>
             ) : error ? (
-              <span className="error">⚠ {error}</span>
+              <p className="error" role="alert">
+                {error}
+              </p>
             ) : result ? (
               <>
-                <p className="translation">{result.translation}</p>
-                {result.transliteration && <p className="muted">🔤 {result.transliteration}</p>}
-                {result.notes && <p className="note">💡 {result.notes}</p>}
+                <p className="translation" lang={to}>
+                  {result.translation}
+                </p>
+                {result.transliteration && (
+                  <p className="out-line">
+                    <span className="out-label">Latin</span>
+                    {result.transliteration}
+                  </p>
+                )}
+                {result.notes && (
+                  <p className="out-line">
+                    <span className="out-label">Note</span>
+                    {result.notes}
+                  </p>
+                )}
               </>
             ) : (
-              <span className="muted">Translation will appear here</span>
+              <p className="empty">The translation appears here.</p>
             )}
           </div>
         </div>
@@ -108,6 +124,18 @@ export function Translate() {
           Translate
         </button>
       </form>
+    </div>
+  )
+}
+
+function LangPicker({ label, value, onChange }: { label: string; value: Lang; onChange: (lang: Lang) => void }) {
+  return (
+    <div className="seg seg-row" role="group" aria-label={`${label} language`}>
+      {langs.map((l) => (
+        <button key={l.id} type="button" aria-pressed={value === l.id} onClick={() => onChange(l.id)}>
+          {l.label}
+        </button>
+      ))}
     </div>
   )
 }

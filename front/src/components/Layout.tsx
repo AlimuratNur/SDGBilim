@@ -1,46 +1,46 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { isMockMode } from '../api/client'
+import { BrandMark } from './BrandMark'
 
 export function Layout() {
   return (
     <div className="app">
+      <a className="skip-link" href="#main">
+        Skip to content
+      </a>
+
       <header className="nav">
         <div className="container nav-inner">
-          <NavLink to="/" className="brand">
-            <span className="brand-mark" aria-hidden>
-              ☀
+          <NavLink to="/" className="brand" aria-label="BilimAI home">
+            <BrandMark />
+            <span>
+              Bilim<span className="brand-ai">AI</span>
             </span>
-            Bilim<span className="brand-accent">AI</span>
           </NavLink>
-          <nav className="nav-links">
+          <nav className="nav-links" aria-label="Main">
             <NavLink to="/" end>
               Home
             </NavLink>
             <NavLink to="/tutor">Tutor</NavLink>
-            <NavLink to="/translate">Translate</NavLink>
+            <NavLink to="/translate">Translator</NavLink>
           </nav>
-          <NavLink to="/tutor" className="btn btn-primary btn-sm nav-cta">
-            Start learning
-          </NavLink>
         </div>
       </header>
 
       {isMockMode && (
-        <div className="mock-banner">
-          Demo mode — answers are mocked. Set <code>VITE_API_URL</code> to connect the DeepSeek backend.
-        </div>
+        <p className="demo-note">
+          Demo mode: answers are pre-written. Set <code>VITE_API_URL</code> to connect the DeepSeek backend.
+        </p>
       )}
 
-      <main>
+      <main id="main">
         <Outlet />
       </main>
 
       <footer className="footer">
         <div className="container footer-inner">
-          <span>
-            BilimAI · SDG KBTU Hackathon 2026 · <strong>SDG 4</strong> Quality Education
-          </span>
-          <span className="muted">Powered by DeepSeek</span>
+          <span>BilimAI · SDG KBTU Hackathon 2026 · SDG 4 Quality Education</span>
+          <span>Powered by DeepSeek</span>
         </div>
       </footer>
     </div>

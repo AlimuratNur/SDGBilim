@@ -27,7 +27,7 @@ export async function mockChat(req: ChatRequest): Promise<ChatResponse> {
   if (last.includes('сәлем') || last.includes('hello') || last.includes('hi')) {
     return {
       reply:
-        'Сәлем! 👋 (Hi!) Мен сенің қазақ тілі мұғаліміңмін — I am your Kazakh tutor.\n\nLet\'s start simple. Try to answer: **Сенің атың кім?** (What is your name?)\n\nHint: start with «Менің атым …»',
+        'Сәлем! (Hi!) Мен сенің қазақ тілі мұғаліміңмін — I am your Kazakh tutor.\n\nLet\'s start simple. Try to answer: **Сенің атың кім?** (What is your name?)\n\nHint: start with «Менің атым …»',
       newWords: [
         { kk: 'сәлем', en: 'hi', ru: 'привет' },
         { kk: 'мұғалім', en: 'teacher', ru: 'учитель' },
@@ -52,7 +52,7 @@ export async function mockChat(req: ChatRequest): Promise<ChatResponse> {
 
   if (last.includes('менің атым')) {
     return {
-      reply: 'Өте жақсы! 🎉 (Very good!) Танысқаныма қуаныштымын — nice to meet you.\n\nNext question: **Сен қайдансың?** (Where are you from?) Answer with «Мен … -данмын / -мын».',
+      reply: 'Өте жақсы! (Very good!) Танысқаныма қуаныштымын — nice to meet you.\n\nNext question: **Сен қайдансың?** (Where are you from?) Answer with «Мен … -данмын / -мын».',
       newWords: [
         { kk: 'өте жақсы', en: 'very good', ru: 'очень хорошо' },
         { kk: 'танысу', en: 'to get acquainted', ru: 'знакомиться' },
