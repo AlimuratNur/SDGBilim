@@ -3,7 +3,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.conftest import FakeDeepSeek
+from tests.conftest import FakeLLM
 
 
 def translate_body(**overrides: Any) -> dict[str, Any]:
@@ -12,7 +12,7 @@ def translate_body(**overrides: Any) -> dict[str, Any]:
 
 
 def test_translate_returns_translation_with_transliteration_and_notes(
-    client: TestClient, llm: FakeDeepSeek
+    client: TestClient, llm: FakeLLM
 ) -> None:
     llm.reply_with(
         {
@@ -32,9 +32,7 @@ def test_translate_returns_translation_with_transliteration_and_notes(
     }
 
 
-def test_translate_omits_empty_transliteration_and_notes(
-    client: TestClient, llm: FakeDeepSeek
-) -> None:
+def test_translate_omits_empty_transliteration_and_notes(client: TestClient, llm: FakeLLM) -> None:
     llm.reply_with({"translation": "Спасибо", "transliteration": "", "notes": ""})
 
     response = client.post("/api/translate", json=translate_body(to="ru"))
@@ -42,8 +40,8 @@ def test_translate_omits_empty_transliteration_and_notes(
     assert response.json() == {"translation": "Спасибо"}
 
 
-def test_translate_sends_text_and_language_pair_to_deepseek(
-    client: TestClient, llm: FakeDeepSeek
+def test_translate_sends_text_and_language_pair_to_the_model(
+    client: TestClient, llm: FakeLLM
 ) -> None:
     llm.reply_with({"translation": "Hello", "transliteration": "", "notes": ""})
 
@@ -54,11 +52,14 @@ def test_translate_sends_text_and_language_pair_to_deepseek(
     call = llm.last_call
     system, message = call["messages"]
     assert system["role"] == "system"
-    assert "json" in system["content"].lower()
     assert message["role"] == "user"
     assert "<text>\nСәлеметсіз бе\n</text>" in message["content"]
     assert "from Kazakh to English" in message["content"]
-    assert call["response_format"] == {"type": "json_object"}
+    assert call["response_format"]["json_schema"]["schema"]["required"] == [
+        "translation",
+        "transliteration",
+        "notes",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -71,7 +72,7 @@ def test_translate_sends_text_and_language_pair_to_deepseek(
     ],
 )
 def test_translate_rejects_invalid_request(
-    client: TestClient, llm: FakeDeepSeek, overrides: dict[str, Any]
+    client: TestClient, llm: FakeLLM, overrides: dict[str, Any]
 ) -> None:
     response = client.post("/api/translate", json=translate_body(**overrides))
 
@@ -79,7 +80,7 @@ def test_translate_rejects_invalid_request(
     assert llm.calls == []
 
 
-def test_translate_reports_content_filter(client: TestClient, llm: FakeDeepSeek) -> None:
+def test_translate_reports_content_filter(client: TestClient, llm: FakeLLM) -> None:
     llm.reply_with("", finish_reason="content_filter")
 
     response = client.post("/api/translate", json=translate_body())

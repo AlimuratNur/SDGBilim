@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.tutor import MAX_HISTORY_MESSAGES
-from tests.conftest import TEST_MODEL, FakeDeepSeek, api_request, api_response
+from tests.conftest import TEST_MODEL, FakeLLM, api_request, api_response
 
 EMPTY_ANSWER = {"reply": "Сәлем!", "corrections": [], "new_words": []}
 
@@ -19,9 +19,7 @@ def chat_body(**overrides: Any) -> dict[str, Any]:
     return body | overrides
 
 
-def test_chat_returns_reply_corrections_and_new_words(
-    client: TestClient, llm: FakeDeepSeek
-) -> None:
+def test_chat_returns_reply_corrections_and_new_words(client: TestClient, llm: FakeLLM) -> None:
     llm.reply_with(
         {
             "reply": "Жақсы талпыныс! (Good try!) **Сен қайдансың?**",
@@ -53,7 +51,7 @@ def test_chat_returns_reply_corrections_and_new_words(
 
 
 def test_chat_omits_missing_russian_translation_of_new_word(
-    client: TestClient, llm: FakeDeepSeek
+    client: TestClient, llm: FakeLLM
 ) -> None:
     llm.reply_with(
         {"reply": "Сәлем!", "corrections": [], "new_words": [{"kk": "су", "en": "water", "ru": ""}]}
@@ -64,8 +62,8 @@ def test_chat_omits_missing_russian_translation_of_new_word(
     assert response.json()["newWords"] == [{"kk": "су", "en": "water"}]
 
 
-def test_chat_sends_system_prompt_and_dialogue_to_deepseek(
-    client: TestClient, llm: FakeDeepSeek
+def test_chat_sends_system_prompt_and_dialogue_to_the_model(
+    client: TestClient, llm: FakeLLM
 ) -> None:
     llm.reply_with(EMPTY_ANSWER)
     dialogue = [
@@ -85,19 +83,19 @@ def test_chat_sends_system_prompt_and_dialogue_to_deepseek(
     assert sent == dialogue
 
 
-def test_chat_asks_for_json_without_thinking(client: TestClient, llm: FakeDeepSeek) -> None:
+def test_chat_asks_for_an_answer_matching_the_json_schema(client: TestClient, llm: FakeLLM) -> None:
     llm.reply_with(EMPTY_ANSWER)
 
     client.post("/api/chat", json=chat_body())
 
-    call = llm.last_call
-    assert call["response_format"] == {"type": "json_object"}
-    # DeepSeek JSON mode requires the word "json" in the prompt.
-    assert "json" in call["messages"][0]["content"].lower()
-    assert call["extra_body"] == {"thinking": {"type": "disabled"}}
+    response_format = llm.last_call["response_format"]
+    schema = response_format["json_schema"]["schema"]
+    assert response_format["type"] == "json_schema"
+    assert schema["required"] == ["reply", "corrections", "new_words"]
+    assert schema["additionalProperties"] is False
 
 
-def test_chat_without_topic_is_free_conversation(client: TestClient, llm: FakeDeepSeek) -> None:
+def test_chat_without_topic_is_free_conversation(client: TestClient, llm: FakeLLM) -> None:
     llm.reply_with(EMPTY_ANSWER)
 
     response = client.post("/api/chat", json=chat_body(topic=None))
@@ -107,7 +105,7 @@ def test_chat_without_topic_is_free_conversation(client: TestClient, llm: FakeDe
 
 
 def test_chat_sends_only_recent_history_starting_with_user(
-    client: TestClient, llm: FakeDeepSeek
+    client: TestClient, llm: FakeLLM
 ) -> None:
     llm.reply_with(EMPTY_ANSWER)
     dialogue = [{"role": "assistant", "content": "Сәлем! I am your tutor."}]
@@ -125,7 +123,7 @@ def test_chat_sends_only_recent_history_starting_with_user(
     assert sent == dialogue[-len(sent) :]
 
 
-def test_chat_drops_leading_assistant_greeting(client: TestClient, llm: FakeDeepSeek) -> None:
+def test_chat_drops_leading_assistant_greeting(client: TestClient, llm: FakeLLM) -> None:
     llm.reply_with(EMPTY_ANSWER)
     dialogue = [
         {"role": "assistant", "content": "Сәлем! I am your tutor."},
@@ -137,8 +135,8 @@ def test_chat_drops_leading_assistant_greeting(client: TestClient, llm: FakeDeep
     assert llm.last_call["messages"][1:] == [{"role": "user", "content": "Сәлем"}]
 
 
-def test_chat_retries_once_when_deepseek_returns_blank_content(
-    client: TestClient, llm: FakeDeepSeek
+def test_chat_retries_once_when_the_model_returns_blank_content(
+    client: TestClient, llm: FakeLLM
 ) -> None:
     llm.reply_with("   ")
     llm.reply_with(EMPTY_ANSWER)
@@ -150,7 +148,7 @@ def test_chat_retries_once_when_deepseek_returns_blank_content(
     assert len(llm.calls) == 2
 
 
-def test_chat_gives_up_when_content_stays_blank(client: TestClient, llm: FakeDeepSeek) -> None:
+def test_chat_gives_up_when_content_stays_blank(client: TestClient, llm: FakeLLM) -> None:
     llm.reply_with("   ")
 
     response = client.post("/api/chat", json=chat_body())
@@ -173,7 +171,7 @@ def test_chat_gives_up_when_content_stays_blank(client: TestClient, llm: FakeDee
     ],
 )
 def test_chat_rejects_invalid_request(
-    client: TestClient, llm: FakeDeepSeek, overrides: dict[str, Any]
+    client: TestClient, llm: FakeLLM, overrides: dict[str, Any]
 ) -> None:
     response = client.post("/api/chat", json=chat_body(**overrides))
 
@@ -186,14 +184,13 @@ def test_chat_rejects_invalid_request(
     [
         pytest.param("content_filter", "", 422, id="content filter"),
         pytest.param("length", '{"reply": "Сәл', 502, id="cut off"),
-        pytest.param("insufficient_system_resource", "", 503, id="deepseek overloaded"),
-        pytest.param("aborted", "", 502, id="aborted"),
+        pytest.param("tool_calls", "", 502, id="unexpected stop"),
         pytest.param("stop", "not json", 502, id="invalid json"),
         pytest.param("stop", '{"reply": "no lists"}', 502, id="schema mismatch"),
     ],
 )
 def test_chat_reports_unusable_answer(
-    client: TestClient, llm: FakeDeepSeek, finish_reason: str, content: str, status_code: int
+    client: TestClient, llm: FakeLLM, finish_reason: str, content: str, status_code: int
 ) -> None:
     llm.reply_with(content, finish_reason=finish_reason)
 
@@ -202,6 +199,15 @@ def test_chat_reports_unusable_answer(
     assert response.status_code == status_code
     assert response.headers["content-type"].startswith("text/plain")
     assert response.text
+
+
+def test_chat_reports_model_refusal(client: TestClient, llm: FakeLLM) -> None:
+    llm.reply_with("", refusal="I can't help with that.")
+
+    response = client.post("/api/chat", json=chat_body())
+
+    assert response.status_code == 422
+    assert response.headers["content-type"].startswith("text/plain")
 
 
 @pytest.mark.parametrize(
@@ -215,7 +221,7 @@ def test_chat_reports_unusable_answer(
         pytest.param(openai.APIConnectionError(request=api_request()), 503, id="no network"),
         pytest.param(openai.APITimeoutError(request=api_request()), 503, id="timeout"),
         pytest.param(
-            openai.APIStatusError("Insufficient Balance", response=api_response(402), body=None),
+            openai.APIStatusError("Payment Required", response=api_response(402), body=None),
             503,
             id="balance is empty",
         ),
@@ -225,14 +231,19 @@ def test_chat_reports_unusable_answer(
             id="bad api key",
         ),
         pytest.param(
+            openai.NotFoundError("model_not_found", response=api_response(404), body=None),
+            500,
+            id="unknown model",
+        ),
+        pytest.param(
             openai.InternalServerError("boom", response=api_response(500), body=None),
             502,
-            id="deepseek outage",
+            id="provider outage",
         ),
     ],
 )
-def test_chat_maps_deepseek_api_errors(
-    client: TestClient, llm: FakeDeepSeek, error: Exception, status_code: int
+def test_chat_maps_llm_api_errors(
+    client: TestClient, llm: FakeLLM, error: Exception, status_code: int
 ) -> None:
     llm.fail_with(error)
 

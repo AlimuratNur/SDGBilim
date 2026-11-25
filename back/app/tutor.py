@@ -1,12 +1,14 @@
-"""Talks to DeepSeek: the tutor chat and the translator."""
+"""Talks to the language model (Meta Model API by default): the tutor chat and the translator."""
 
 import logging
 from collections.abc import Sequence
+from functools import cache
 
 import openai
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
-from pydantic import BaseModel, ValidationError
+from openai.types.shared_params import ResponseFormatJSONSchema
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from app.prompts import TRANSLATE_SYSTEM, chat_system_prompt, translate_user_message
 from app.schemas import (
@@ -26,9 +28,7 @@ logger = logging.getLogger(__name__)
 MAX_HISTORY_MESSAGES = 30
 # Answers are short JSON objects; the cap only guards against runaway output.
 MAX_OUTPUT_TOKENS = 4096
-# DeepSeek's recommended temperature for conversation and translation.
-TEMPERATURE = 1.3
-# DeepSeek JSON mode sometimes returns blank content; its docs say to retry.
+# Some OpenAI-compatible providers occasionally return blank content for a JSON answer.
 ATTEMPTS_ON_BLANK_CONTENT = 2
 
 
@@ -41,24 +41,47 @@ class TutorError(Exception):
         self.message = message
 
 
-# What the model must return. DeepSeek JSON mode does not enforce a schema, so every answer
-# is validated against these models; empty strings and lists mean "nothing to add".
-class _DraftWord(BaseModel):
+# What the model must return. The request sends these as a JSON schema (no extra keys, every
+# key required); answers are validated against them too. Empty strings and lists mean
+# "nothing to add".
+class _Draft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class _DraftCorrection(_Draft):
+    original: str
+    corrected: str
+    explanation: str
+
+
+class _DraftWord(_Draft):
     kk: str
     en: str
     ru: str
 
 
-class _ChatDraft(BaseModel):
+class _ChatDraft(_Draft):
     reply: str
-    corrections: list[Correction]
+    corrections: list[_DraftCorrection]
     new_words: list[_DraftWord]
 
 
-class _TranslationDraft(BaseModel):
+class _TranslationDraft(_Draft):
     translation: str
     transliteration: str
     notes: str
+
+
+@cache
+def _response_format(model: type[BaseModel]) -> ResponseFormatJSONSchema:
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": model.__name__.strip("_"),
+            "schema": model.model_json_schema(),
+            "strict": True,
+        },
+    }
 
 
 def recent_dialogue(messages: Sequence[ChatMessage]) -> list[ChatCompletionMessageParam]:
@@ -88,7 +111,7 @@ class Tutor:
         )
         return ChatResponse(
             reply=answer.reply,
-            corrections=answer.corrections,
+            corrections=[Correction(**c.model_dump()) for c in answer.corrections],
             new_words=[NewWord(kk=w.kk, en=w.en, ru=w.ru or None) for w in answer.new_words],
         )
 
@@ -118,63 +141,67 @@ class Tutor:
             *messages,
         ]
         for _ in range(ATTEMPTS_ON_BLANK_CONTENT):
-            content = await self._complete(conversation)
+            content = await self._complete(conversation, _response_format(output))
             if content.strip():
                 break
-            logger.warning("DeepSeek returned blank content")
+            logger.warning("The model returned blank content")
         else:
             raise TutorError(502, "The tutor sent an empty answer. Try again.")
 
         try:
             return output.model_validate_json(content)
         except ValidationError as error:
-            logger.error("DeepSeek answer does not match the expected JSON: %s", error)
+            logger.error("The model's answer does not match the JSON schema: %s", error)
             raise TutorError(502, "The tutor sent a broken answer. Try again.") from error
 
-    async def _complete(self, conversation: list[ChatCompletionMessageParam]) -> str:
+    async def _complete(
+        self,
+        conversation: list[ChatCompletionMessageParam],
+        response_format: ResponseFormatJSONSchema,
+    ) -> str:
         """Returns the text of one complete answer, or raises TutorError."""
-        completion = await self._create(conversation)
+        completion = await self._create(conversation, response_format)
         if not completion.choices:
-            logger.error("DeepSeek returned no choices on %s", completion.id)
+            logger.error("The model returned no choices on %s", completion.id)
             raise TutorError(502, "The tutor sent an empty answer. Try again.")
         choice = completion.choices[0]
-        # DeepSeek adds finish reasons the OpenAI types do not list, so compare plain strings.
+        # Providers may add finish reasons the OpenAI types do not list, so compare plain strings.
         finish_reason: str = choice.finish_reason
 
-        if finish_reason == "content_filter":
-            logger.warning("DeepSeek filtered the answer to %s", completion.id)
+        if choice.message.refusal or finish_reason == "content_filter":
+            logger.warning("The model declined %s: %s", completion.id, choice.message.refusal)
             raise TutorError(422, "The tutor can't help with this request. Try rephrasing it.")
-        if finish_reason == "insufficient_system_resource":
-            raise TutorError(503, "The tutor is busy right now. Try again in a minute.")
         if finish_reason != "stop":
-            logger.error("DeepSeek stopped early (%s) on %s", finish_reason, completion.id)
+            logger.error("The model stopped early (%s) on %s", finish_reason, completion.id)
             raise TutorError(502, "The answer was cut off. Try a shorter message.")
         return choice.message.content or ""
 
-    async def _create(self, conversation: list[ChatCompletionMessageParam]) -> ChatCompletion:
+    async def _create(
+        self,
+        conversation: list[ChatCompletionMessageParam],
+        response_format: ResponseFormatJSONSchema,
+    ) -> ChatCompletion:
         try:
             return await self._client.chat.completions.create(
                 model=self._model,
                 messages=conversation,
-                response_format={"type": "json_object"},
+                response_format=response_format,
                 max_tokens=MAX_OUTPUT_TOKENS,
-                temperature=TEMPERATURE,
-                # Non-thinking mode: answers come back in a few seconds.
-                extra_body={"thinking": {"type": "disabled"}},
             )
         except (openai.RateLimitError, openai.APIConnectionError) as error:
-            logger.warning("DeepSeek unavailable: %r", error)
+            logger.warning("The LLM API is unavailable: %r", error)
             raise TutorError(503, "The tutor is busy right now. Try again in a minute.") from error
         except (openai.AuthenticationError, openai.PermissionDeniedError) as error:
-            logger.error("DeepSeek rejected the backend API key: %r", error)
-            raise TutorError(
-                500, "The backend is misconfigured: check DEEPSEEK_API_KEY."
-            ) from error
+            logger.error("The LLM API rejected the backend API key: %r", error)
+            raise TutorError(500, "The backend is misconfigured: check LLM_API_KEY.") from error
+        except openai.NotFoundError as error:
+            logger.error("The LLM API does not know model %s: %r", self._model, error)
+            raise TutorError(500, "The backend is misconfigured: check LLM_MODEL.") from error
         except openai.APIStatusError as error:
             if error.status_code == 402:
-                logger.error("DeepSeek balance is empty: top up the account")
+                logger.error("The LLM account balance is empty: top it up")
                 raise TutorError(
                     503, "The tutor is unavailable: the AI service balance is empty."
                 ) from error
-            logger.error("DeepSeek API error %s: %r", error.status_code, error)
+            logger.error("LLM API error %s: %r", error.status_code, error)
             raise TutorError(502, "The AI service returned an error. Try again.") from error

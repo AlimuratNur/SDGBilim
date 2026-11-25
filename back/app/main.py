@@ -13,28 +13,26 @@ from app.schemas import ChatRequest, ChatResponse, TranslateRequest, TranslateRe
 from app.tutor import Tutor, TutorError
 
 
-def _deepseek_client(settings: Settings) -> AsyncOpenAI:
+def _llm_client(settings: Settings) -> AsyncOpenAI:
     # The key is always passed explicitly: the OpenAI SDK would otherwise fall back to
-    # OPENAI_API_KEY and send it to DeepSeek.
-    if settings.deepseek_api_key is None:
-        raise RuntimeError(
-            "No DeepSeek API key: set DEEPSEEK_API_KEY in back/.env (see .env.example)."
-        )
+    # OPENAI_API_KEY and send it to another provider.
+    if settings.llm_api_key is None:
+        raise RuntimeError("No LLM API key: set LLM_API_KEY in back/.env (see .env.example).")
     return AsyncOpenAI(
-        api_key=settings.deepseek_api_key.get_secret_value(),
-        base_url=settings.deepseek_base_url,
+        api_key=settings.llm_api_key.get_secret_value(),
+        base_url=settings.llm_base_url,
         timeout=settings.request_timeout_seconds,
     )
 
 
 def create_app(settings: Settings | None = None, llm_client: AsyncOpenAI | None = None) -> FastAPI:
-    """Builds the app. Tests pass their own settings and a fake DeepSeek client."""
+    """Builds the app. Tests pass their own settings and a fake LLM client."""
     settings = settings or Settings()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        client = llm_client or _deepseek_client(settings)
-        app.state.tutor = Tutor(client, settings.deepseek_model)
+        client = llm_client or _llm_client(settings)
+        app.state.tutor = Tutor(client, settings.llm_model)
         yield
         if llm_client is None:
             await client.close()

@@ -1,6 +1,7 @@
 """System prompts for the tutor and the translator.
 
-DeepSeek JSON mode needs the word "json" and an example of the output in the prompt.
+The JSON schema in the request fixes the shape of each answer; the example in each prompt
+shows the model what good content looks like.
 """
 
 import json

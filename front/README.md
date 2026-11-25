@@ -17,7 +17,7 @@ To use the real backend, create `front/.env.local`:
 VITE_API_URL=http://localhost:8000
 ```
 
-> The DeepSeek API key must stay on the backend. The browser only talks to `back/`.
+> The LLM API key must stay on the backend. The browser only talks to `back/`.
 
 ## Pages
 
@@ -54,7 +54,7 @@ Types live in `src/api/types.ts`. The backend needs CORS enabled for the fronten
 }
 ```
 
-The backend asks DeepSeek for a JSON answer and validates it, so `corrections` and `newWords` come back as separate fields.
+The backend asks the model for an answer that follows a JSON schema and validates it, so `corrections` and `newWords` come back as separate fields.
 
 ### `POST /api/translate`
 

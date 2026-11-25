@@ -39,7 +39,7 @@ class FakeChat:
         self.completions = FakeCompletions()
 
 
-class FakeDeepSeek:
+class FakeLLM:
     def __init__(self) -> None:
         self.chat = FakeChat()
 
@@ -52,10 +52,15 @@ class FakeDeepSeek:
         assert self.calls, "the model was not called"
         return self.calls[-1]
 
-    def reply_with(self, payload: dict[str, Any] | str, finish_reason: str = "stop") -> None:
+    def reply_with(
+        self,
+        payload: dict[str, Any] | str,
+        finish_reason: str = "stop",
+        refusal: str | None = None,
+    ) -> None:
         content = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)
-        # `construct` skips validation, like the SDK does for real responses: DeepSeek sends
-        # finish_reason values (e.g. "insufficient_system_resource") that OpenAI does not.
+        # `construct` skips validation, like the SDK does for real responses, which may carry
+        # provider-specific values.
         completion = ChatCompletion.construct(
             id="chatcmpl-test",
             object="chat.completion",
@@ -65,7 +70,7 @@ class FakeDeepSeek:
                 {
                     "index": 0,
                     "finish_reason": finish_reason,
-                    "message": {"role": "assistant", "content": content},
+                    "message": {"role": "assistant", "content": content, "refusal": refusal},
                 }
             ],
         )
@@ -76,7 +81,7 @@ class FakeDeepSeek:
 
 
 def api_request() -> httpx2.Request:
-    return httpx2.Request("POST", "https://api.deepseek.com/chat/completions")
+    return httpx2.Request("POST", "https://api.meta.ai/v1/chat/completions")
 
 
 def api_response(status_code: int) -> httpx2.Response:
@@ -84,13 +89,13 @@ def api_response(status_code: int) -> httpx2.Response:
 
 
 @pytest.fixture
-def llm() -> FakeDeepSeek:
-    return FakeDeepSeek()
+def llm() -> FakeLLM:
+    return FakeLLM()
 
 
 @pytest.fixture
-def client(llm: FakeDeepSeek) -> Iterator[TestClient]:
-    settings = Settings(_env_file=None, deepseek_model=TEST_MODEL, cors_origins=[FRONTEND_ORIGIN])
+def client(llm: FakeLLM) -> Iterator[TestClient]:
+    settings = Settings(_env_file=None, llm_model=TEST_MODEL, cors_origins=[FRONTEND_ORIGIN])
     app = create_app(settings, llm_client=cast(AsyncOpenAI, llm))
     with TestClient(app) as test_client:
         yield test_client

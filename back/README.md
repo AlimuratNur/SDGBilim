@@ -1,14 +1,14 @@
 # BilimAI — backend
 
 FastAPI server for the Kazakh-language AI tutor (SDG KBTU Hackathon, SDG 4).
-It holds the DeepSeek API key and answers the frontend in `front/`.
+It holds the LLM API key (Meta Model API) and answers the frontend in `front/`.
 
 ## Run
 
-Needs [uv](https://docs.astral.sh/uv/) and a [DeepSeek API key](https://platform.deepseek.com/api_keys).
+Needs [uv](https://docs.astral.sh/uv/) and a [Meta Model API key](https://dev.meta.ai/).
 
 ```bash
-cp .env.example .env    # then put your key into DEEPSEEK_API_KEY
+cp .env.example .env    # then put your key into LLM_API_KEY
 uv sync
 uv run uvicorn app.main:app --reload --port 8000
 ```
@@ -25,7 +25,7 @@ on its own in demo mode.
 ## Check
 
 ```bash
-uv run pytest           # tests: DeepSeek is replaced by a fake client, no key or network needed
+uv run pytest           # tests: the LLM is replaced by a fake client, no key or network needed
 uv run ruff check .     # lint
 uv run ruff format .    # format
 uv run mypy app tests   # types (strict)
@@ -37,11 +37,11 @@ Read from environment variables or `back/.env` (git-ignored).
 
 | Variable                  | Default                 | What it does                              |
 | ------------------------- | ----------------------- | ----------------------------------------- |
-| `DEEPSEEK_API_KEY`        | —                       | DeepSeek API key. Required.               |
-| `DEEPSEEK_MODEL`          | `deepseek-flash`        | Model for the tutor and the translator.   |
-| `DEEPSEEK_BASE_URL`       | `https://api.deepseek.com` | DeepSeek API endpoint.                 |
+| `LLM_API_KEY`             | —                       | Meta Model API key. Required.             |
+| `LLM_MODEL`               | `muse-spark-1.3`        | Model for the tutor and the translator.   |
+| `LLM_BASE_URL`            | `https://api.meta.ai/v1` | Any OpenAI-compatible chat API.          |
 | `CORS_ORIGINS`            | `http://localhost:5173` | Comma-separated frontend origins.         |
-| `REQUEST_TIMEOUT_SECONDS` | `60`                    | Timeout for one DeepSeek request.         |
+| `REQUEST_TIMEOUT_SECONDS` | `60`                    | Timeout for one model request.            |
 
 ## Deploy (Vercel)
 
@@ -49,7 +49,7 @@ Two Vercel projects in the `dorhsis-projects` scope, one per folder:
 
 | Folder   | Vercel project | Production URL                      | Env vars (Production)                    |
 | -------- | -------------- | ----------------------------------- | ---------------------------------------- |
-| `back/`  | `sdgbilim-api` | https://sdgbilim-api.vercel.app     | `DEEPSEEK_API_KEY`, `CORS_ORIGINS`       |
+| `back/`  | `sdgbilim-api` | https://sdgbilim-api.vercel.app     | `LLM_API_KEY`, `CORS_ORIGINS`            |
 | `front/` | `sdgbilim`     | https://sdgbilim.vercel.app         | `VITE_API_URL=https://sdgbilim-api.vercel.app` |
 
 `vercel.json` in each folder pins the framework (`fastapi`, `vite`); `front/vercel.json` also
@@ -87,7 +87,7 @@ cd front && npx vercel@latest deploy --prod
 The API key is set once in Vercel, never committed:
 
 ```bash
-cd back && npx vercel@latest env add DEEPSEEK_API_KEY production
+cd back && npx vercel@latest env add LLM_API_KEY production
 ```
 
 Env var changes apply on the next deploy. If the frontend moves to another domain, update
@@ -109,10 +109,10 @@ Errors:
 
 | Status | When                                                                 | Body                   |
 | ------ | -------------------------------------------------------------------- | ---------------------- |
-| 422    | Invalid request, or DeepSeek's content filter blocked the answer     | JSON details / text    |
-| 500    | The API key is wrong                                                 | text for the student   |
-| 502    | DeepSeek returned an error, a cut-off, empty or broken answer        | text for the student   |
-| 503    | Rate limit, overload, timeout, no network or empty DeepSeek balance  | text for the student   |
+| 422    | Invalid request, or the model declined to answer                    | JSON details / text    |
+| 500    | The API key or the model name is wrong                               | text for the student   |
+| 502    | The model returned an error, a cut-off, empty or broken answer       | text for the student   |
+| 503    | Rate limit, timeout, no network or empty account balance            | text for the student   |
 
 The frontend shows the body of an error response to the student, so tutor errors are plain text.
 
@@ -120,22 +120,23 @@ The frontend shows the body of an error response to the student, so tutor errors
 
 ```
 app/
-  main.py      FastAPI app: routes, CORS, error handler, DeepSeek client
+  main.py      FastAPI app: routes, CORS, error handler, LLM client
   schemas.py   HTTP contract (mirror of front/src/api/types.ts)
-  tutor.py     DeepSeek calls: chat and translate, error mapping
+  tutor.py     Model calls: chat and translate, error mapping
   prompts.py   System prompts, levels and topics
   config.py    Settings from env / .env
-tests/         API tests with a fake DeepSeek client
+tests/         API tests with a fake LLM client
 ```
 
-- DeepSeek is called through the OpenAI SDK (`base_url=https://api.deepseek.com`), model
-  `deepseek-flash` in non-thinking mode, so answers come back in a few seconds.
-- [JSON mode](https://api-docs.deepseek.com/guides/json_mode) returns valid JSON but does not
-  enforce a schema, so the prompts show an example answer and every answer is validated with
-  Pydantic. `finish_reason` is checked first: a filtered or cut-off answer becomes a clear error.
-  Blank content, a known JSON-mode quirk, is retried once.
+- The model is called through the OpenAI SDK with `LLM_BASE_URL`, by default the
+  [Meta Model API](https://dev.meta.ai/docs) and `muse-spark-1.3`. Any OpenAI-compatible
+  provider with JSON-schema output works by changing the three `LLM_*` variables.
+- Each request sends a strict [JSON schema](https://dev.meta.ai/docs/structured-output) built
+  from Pydantic models, and every answer is validated against it. `finish_reason` and
+  `refusal` are checked first: a declined or cut-off answer becomes a clear error.
+  Blank content is retried once.
 - Chat sends only the last 30 messages of the dialogue, so long lessons stay fast and cheap.
 - The key is always passed explicitly, so an `OPENAI_API_KEY` from the environment is never
-  sent to DeepSeek.
+  sent to the provider.
 - The text to translate is wrapped in `<text>` tags, and the prompt tells the model never to
   follow instructions inside it.

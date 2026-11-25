@@ -8,31 +8,31 @@ from tests.conftest import FRONTEND_ORIGIN
 
 
 @pytest.fixture
-def no_deepseek_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+def no_llm_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
 
 
-@pytest.mark.usefixtures("no_deepseek_key")
-def test_startup_fails_clearly_without_deepseek_key() -> None:
+@pytest.mark.usefixtures("no_llm_key")
+def test_startup_fails_clearly_without_llm_key() -> None:
     app = create_app(Settings(_env_file=None))
 
-    with pytest.raises(RuntimeError, match="DEEPSEEK_API_KEY"), TestClient(app):
+    with pytest.raises(RuntimeError, match="LLM_API_KEY"), TestClient(app):
         pass
 
 
-@pytest.mark.usefixtures("no_deepseek_key")
-def test_startup_never_sends_an_openai_key_to_deepseek(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.usefixtures("no_llm_key")
+def test_startup_never_sends_an_openai_key_to_the_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     # The OpenAI SDK falls back to OPENAI_API_KEY; the backend must not.
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test")
     app = create_app(Settings(_env_file=None))
 
-    with pytest.raises(RuntimeError, match="DEEPSEEK_API_KEY"), TestClient(app):
+    with pytest.raises(RuntimeError, match="LLM_API_KEY"), TestClient(app):
         pass
 
 
-@pytest.mark.usefixtures("no_deepseek_key")
+@pytest.mark.usefixtures("no_llm_key")
 def test_startup_uses_api_key_from_settings() -> None:
-    app = create_app(Settings(_env_file=None, deepseek_api_key=SecretStr("sk-test")))
+    app = create_app(Settings(_env_file=None, llm_api_key=SecretStr("test-key")))
 
     with TestClient(app) as client:
         assert client.get("/api/health").status_code == 200
@@ -74,3 +74,13 @@ def test_settings_read_comma_separated_cors_origins(monkeypatch: pytest.MonkeyPa
     settings = Settings(_env_file=None)
 
     assert settings.cors_origins == ["http://localhost:5173", "https://bilim.example"]
+
+
+def test_settings_default_to_meta_model_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("LLM_BASE_URL", "LLM_MODEL"):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.llm_base_url == "https://api.meta.ai/v1"
+    assert settings.llm_model == "muse-spark-1.3"

@@ -9,9 +9,10 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    deepseek_api_key: SecretStr | None = None
-    deepseek_model: str = "deepseek-flash"
-    deepseek_base_url: str = "https://api.deepseek.com"
+    # Any OpenAI-compatible chat API. Defaults: Meta Model API (https://dev.meta.ai/docs).
+    llm_api_key: SecretStr | None = None
+    llm_model: str = "muse-spark-1.3"
+    llm_base_url: str = "https://api.meta.ai/v1"
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:5173"]
     request_timeout_seconds: float = 60.0
 
