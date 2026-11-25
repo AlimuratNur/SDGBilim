@@ -27,7 +27,7 @@ export function Layout() {
 
       {isMockMode && (
         <div className="mock-banner">
-          Demo mode — answers are mocked. Set <code>VITE_API_URL</code> to connect the Claude Haiku backend.
+          Demo mode — answers are mocked. Set <code>VITE_API_URL</code> to connect the DeepSeek backend.
         </div>
       )}
 
@@ -40,7 +40,7 @@ export function Layout() {
           <span>
             BilimAI · SDG KBTU Hackathon 2026 · <strong>SDG 4</strong> Quality Education
           </span>
-          <span className="muted">Powered by Claude Haiku</span>
+          <span className="muted">Powered by DeepSeek</span>
         </div>
       </footer>
     </div>

@@ -9,7 +9,7 @@ Level = Literal["beginner", "intermediate", "advanced"]
 Lang = Literal["kk", "en", "ru"]
 
 MAX_MESSAGE_CHARS = 2000
-# Abuse guard only: the tutor itself sends just the recent part of the dialogue to Claude.
+# Abuse guard only: the tutor itself sends just the recent part of the dialogue to the model.
 MAX_REQUEST_MESSAGES = 200
 MAX_TRANSLATE_CHARS = 2000
 

@@ -61,7 +61,7 @@ export async function mockChat(req: ChatRequest): Promise<ChatResponse> {
   }
 
   return {
-    reply: `Түсіндім! (I understand!) This is a demo answer — connect the backend (VITE_API_URL) to talk to the real Claude Haiku tutor.\n\nTopic: ${req.topic ?? 'free talk'} · Level: ${req.level}.\n\nTry writing «Сәлем» or «Менің атым Айгерім».`,
+    reply: `Түсіндім! (I understand!) This is a demo answer — connect the backend (VITE_API_URL) to talk to the real DeepSeek tutor.\n\nTopic: ${req.topic ?? 'free talk'} · Level: ${req.level}.\n\nTry writing «Сәлем» or «Менің атым Айгерім».`,
   }
 }
 

@@ -9,10 +9,9 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # When empty, the Anthropic SDK resolves credentials itself
-    # (ANTHROPIC_API_KEY in the process env, or an `ant auth login` profile).
-    anthropic_api_key: SecretStr | None = None
-    claude_model: str = "claude-haiku-5-5"
+    deepseek_api_key: SecretStr | None = None
+    deepseek_model: str = "deepseek-flash"
+    deepseek_base_url: str = "https://api.deepseek.com"
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:5173"]
     request_timeout_seconds: float = 60.0
 

@@ -3,7 +3,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.conftest import FakeClaude
+from tests.conftest import FakeDeepSeek
 
 
 def translate_body(**overrides: Any) -> dict[str, Any]:
@@ -12,9 +12,9 @@ def translate_body(**overrides: Any) -> dict[str, Any]:
 
 
 def test_translate_returns_translation_with_transliteration_and_notes(
-    client: TestClient, claude: FakeClaude
+    client: TestClient, llm: FakeDeepSeek
 ) -> None:
-    claude.reply_with(
+    llm.reply_with(
         {
             "translation": "Рақмет",
             "transliteration": "Raqmet",
@@ -33,30 +33,32 @@ def test_translate_returns_translation_with_transliteration_and_notes(
 
 
 def test_translate_omits_empty_transliteration_and_notes(
-    client: TestClient, claude: FakeClaude
+    client: TestClient, llm: FakeDeepSeek
 ) -> None:
-    claude.reply_with({"translation": "Спасибо", "transliteration": "", "notes": ""})
+    llm.reply_with({"translation": "Спасибо", "transliteration": "", "notes": ""})
 
     response = client.post("/api/translate", json=translate_body(to="ru"))
 
     assert response.json() == {"translation": "Спасибо"}
 
 
-def test_translate_sends_text_and_language_pair_to_claude(
-    client: TestClient, claude: FakeClaude
+def test_translate_sends_text_and_language_pair_to_deepseek(
+    client: TestClient, llm: FakeDeepSeek
 ) -> None:
-    claude.reply_with({"translation": "Hello", "transliteration": "", "notes": ""})
+    llm.reply_with({"translation": "Hello", "transliteration": "", "notes": ""})
 
     client.post(
         "/api/translate", json=translate_body(text="Сәлеметсіз бе", **{"from": "kk"}, to="en")
     )
 
-    call = claude.last_call
-    [message] = call["messages"]
+    call = llm.last_call
+    system, message = call["messages"]
+    assert system["role"] == "system"
+    assert "json" in system["content"].lower()
     assert message["role"] == "user"
     assert "<text>\nСәлеметсіз бе\n</text>" in message["content"]
     assert "from Kazakh to English" in message["content"]
-    assert call["output_config"]["format"]["type"] == "json_schema"
+    assert call["response_format"] == {"type": "json_object"}
 
 
 @pytest.mark.parametrize(
@@ -69,16 +71,16 @@ def test_translate_sends_text_and_language_pair_to_claude(
     ],
 )
 def test_translate_rejects_invalid_request(
-    client: TestClient, claude: FakeClaude, overrides: dict[str, Any]
+    client: TestClient, llm: FakeDeepSeek, overrides: dict[str, Any]
 ) -> None:
     response = client.post("/api/translate", json=translate_body(**overrides))
 
     assert response.status_code == 422
-    assert claude.messages.calls == []
+    assert llm.calls == []
 
 
-def test_translate_reports_refusal(client: TestClient, claude: FakeClaude) -> None:
-    claude.reply_with("", stop_reason="refusal")
+def test_translate_reports_content_filter(client: TestClient, llm: FakeDeepSeek) -> None:
+    llm.reply_with("", finish_reason="content_filter")
 
     response = client.post("/api/translate", json=translate_body())
 

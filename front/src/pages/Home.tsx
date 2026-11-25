@@ -41,7 +41,7 @@ export function Home() {
             </h1>
             <p className="lead">
               BilimAI is a patient tutor that speaks with you, corrects your mistakes and translates on the fly — powered by
-              Claude Haiku. Available 24/7, free for every student.
+              DeepSeek. Available 24/7, free for every student.
             </p>
             <div className="hero-actions">
               <Link to="/tutor" className="btn btn-primary">

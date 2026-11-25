@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
@@ -8,37 +6,33 @@ from app.config import Settings
 from app.main import create_app
 from tests.conftest import FRONTEND_ORIGIN
 
-CREDENTIAL_ENV_VARS = [
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "ANTHROPIC_PROFILE",
-    "ANTHROPIC_CONFIG_DIR",
-    "ANTHROPIC_FEDERATION_RULE_ID",
-    "ANTHROPIC_ORGANIZATION_ID",
-    "ANTHROPIC_IDENTITY_TOKEN",
-    "ANTHROPIC_IDENTITY_TOKEN_FILE",
-]
-
 
 @pytest.fixture
-def no_anthropic_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    for name in CREDENTIAL_ENV_VARS:
-        monkeypatch.delenv(name, raising=False)
-    # An empty home directory: no `ant auth login` profile in ~/.config/anthropic either.
-    monkeypatch.setenv("HOME", str(tmp_path))
+def no_deepseek_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
 
 
-@pytest.mark.usefixtures("no_anthropic_credentials")
-def test_startup_fails_clearly_without_anthropic_credentials() -> None:
+@pytest.mark.usefixtures("no_deepseek_key")
+def test_startup_fails_clearly_without_deepseek_key() -> None:
     app = create_app(Settings(_env_file=None))
 
-    with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"), TestClient(app):
+    with pytest.raises(RuntimeError, match="DEEPSEEK_API_KEY"), TestClient(app):
         pass
 
 
-@pytest.mark.usefixtures("no_anthropic_credentials")
+@pytest.mark.usefixtures("no_deepseek_key")
+def test_startup_never_sends_an_openai_key_to_deepseek(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The OpenAI SDK falls back to OPENAI_API_KEY; the backend must not.
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test")
+    app = create_app(Settings(_env_file=None))
+
+    with pytest.raises(RuntimeError, match="DEEPSEEK_API_KEY"), TestClient(app):
+        pass
+
+
+@pytest.mark.usefixtures("no_deepseek_key")
 def test_startup_uses_api_key_from_settings() -> None:
-    app = create_app(Settings(_env_file=None, anthropic_api_key=SecretStr("sk-ant-test")))
+    app = create_app(Settings(_env_file=None, deepseek_api_key=SecretStr("sk-test")))
 
     with TestClient(app) as client:
         assert client.get("/api/health").status_code == 200

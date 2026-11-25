@@ -3,8 +3,8 @@ name = "bilimai-back"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "anthropic>=2.14.0",
     "fastapi>=0.165.0",
+    "openai>=3.59.0",
     "pydantic-settings>=2.16.3",
     "uvicorn[standard]>=0.54.0",
 ]

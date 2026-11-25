@@ -1,11 +1,13 @@
 from typing import Any
 
-import anthropic
+import openai
 import pytest
 from fastapi.testclient import TestClient
 
 from app.tutor import MAX_HISTORY_MESSAGES
-from tests.conftest import TEST_MODEL, FakeClaude, api_request, api_response
+from tests.conftest import TEST_MODEL, FakeDeepSeek, api_request, api_response
+
+EMPTY_ANSWER = {"reply": "Сәлем!", "corrections": [], "new_words": []}
 
 
 def chat_body(**overrides: Any) -> dict[str, Any]:
@@ -18,9 +20,9 @@ def chat_body(**overrides: Any) -> dict[str, Any]:
 
 
 def test_chat_returns_reply_corrections_and_new_words(
-    client: TestClient, claude: FakeClaude
+    client: TestClient, llm: FakeDeepSeek
 ) -> None:
-    claude.reply_with(
+    llm.reply_with(
         {
             "reply": "Жақсы талпыныс! (Good try!) **Сен қайдансың?**",
             "corrections": [
@@ -51,9 +53,9 @@ def test_chat_returns_reply_corrections_and_new_words(
 
 
 def test_chat_omits_missing_russian_translation_of_new_word(
-    client: TestClient, claude: FakeClaude
+    client: TestClient, llm: FakeDeepSeek
 ) -> None:
-    claude.reply_with(
+    llm.reply_with(
         {"reply": "Сәлем!", "corrections": [], "new_words": [{"kk": "су", "en": "water", "ru": ""}]}
     )
 
@@ -62,10 +64,10 @@ def test_chat_omits_missing_russian_translation_of_new_word(
     assert response.json()["newWords"] == [{"kk": "су", "en": "water"}]
 
 
-def test_chat_sends_dialogue_level_and_topic_to_claude(
-    client: TestClient, claude: FakeClaude
+def test_chat_sends_system_prompt_and_dialogue_to_deepseek(
+    client: TestClient, llm: FakeDeepSeek
 ) -> None:
-    claude.reply_with({"reply": "Сәлем!", "corrections": [], "new_words": []})
+    llm.reply_with(EMPTY_ANSWER)
     dialogue = [
         {"role": "user", "content": "Сәлем"},
         {"role": "assistant", "content": "Сәлем! Сенің атың кім?"},
@@ -74,27 +76,40 @@ def test_chat_sends_dialogue_level_and_topic_to_claude(
 
     client.post("/api/chat", json=chat_body(messages=dialogue, level="advanced", topic="food"))
 
-    call = claude.last_call
+    call = llm.last_call
+    system, *sent = call["messages"]
     assert call["model"] == TEST_MODEL
-    assert call["messages"] == dialogue
-    assert "advanced" in call["system"]
-    assert "food" in call["system"]
-    assert call["output_config"]["format"]["type"] == "json_schema"
+    assert system["role"] == "system"
+    assert "advanced" in system["content"]
+    assert "food" in system["content"]
+    assert sent == dialogue
 
 
-def test_chat_without_topic_is_free_conversation(client: TestClient, claude: FakeClaude) -> None:
-    claude.reply_with({"reply": "Сәлем!", "corrections": [], "new_words": []})
+def test_chat_asks_for_json_without_thinking(client: TestClient, llm: FakeDeepSeek) -> None:
+    llm.reply_with(EMPTY_ANSWER)
+
+    client.post("/api/chat", json=chat_body())
+
+    call = llm.last_call
+    assert call["response_format"] == {"type": "json_object"}
+    # DeepSeek JSON mode requires the word "json" in the prompt.
+    assert "json" in call["messages"][0]["content"].lower()
+    assert call["extra_body"] == {"thinking": {"type": "disabled"}}
+
+
+def test_chat_without_topic_is_free_conversation(client: TestClient, llm: FakeDeepSeek) -> None:
+    llm.reply_with(EMPTY_ANSWER)
 
     response = client.post("/api/chat", json=chat_body(topic=None))
 
     assert response.status_code == 200
-    assert "free conversation" in claude.last_call["system"]
+    assert "free conversation" in llm.last_call["messages"][0]["content"]
 
 
 def test_chat_sends_only_recent_history_starting_with_user(
-    client: TestClient, claude: FakeClaude
+    client: TestClient, llm: FakeDeepSeek
 ) -> None:
-    claude.reply_with({"reply": "Жақсы!", "corrections": [], "new_words": []})
+    llm.reply_with(EMPTY_ANSWER)
     dialogue = [{"role": "assistant", "content": "Сәлем! I am your tutor."}]
     for turn in range(40):
         dialogue.append({"role": "user", "content": f"question {turn}"})
@@ -103,15 +118,15 @@ def test_chat_sends_only_recent_history_starting_with_user(
 
     client.post("/api/chat", json=chat_body(messages=dialogue))
 
-    sent = claude.last_call["messages"]
+    sent = llm.last_call["messages"][1:]
     assert len(sent) <= MAX_HISTORY_MESSAGES
     assert sent[0]["role"] == "user"
     assert sent[-1] == {"role": "user", "content": "last question"}
     assert sent == dialogue[-len(sent) :]
 
 
-def test_chat_drops_leading_assistant_greeting(client: TestClient, claude: FakeClaude) -> None:
-    claude.reply_with({"reply": "Сәлем!", "corrections": [], "new_words": []})
+def test_chat_drops_leading_assistant_greeting(client: TestClient, llm: FakeDeepSeek) -> None:
+    llm.reply_with(EMPTY_ANSWER)
     dialogue = [
         {"role": "assistant", "content": "Сәлем! I am your tutor."},
         {"role": "user", "content": "Сәлем"},
@@ -119,7 +134,29 @@ def test_chat_drops_leading_assistant_greeting(client: TestClient, claude: FakeC
 
     client.post("/api/chat", json=chat_body(messages=dialogue))
 
-    assert claude.last_call["messages"] == [{"role": "user", "content": "Сәлем"}]
+    assert llm.last_call["messages"][1:] == [{"role": "user", "content": "Сәлем"}]
+
+
+def test_chat_retries_once_when_deepseek_returns_blank_content(
+    client: TestClient, llm: FakeDeepSeek
+) -> None:
+    llm.reply_with("   ")
+    llm.reply_with(EMPTY_ANSWER)
+
+    response = client.post("/api/chat", json=chat_body())
+
+    assert response.status_code == 200
+    assert response.json()["reply"] == "Сәлем!"
+    assert len(llm.calls) == 2
+
+
+def test_chat_gives_up_when_content_stays_blank(client: TestClient, llm: FakeDeepSeek) -> None:
+    llm.reply_with("   ")
+
+    response = client.post("/api/chat", json=chat_body())
+
+    assert response.status_code == 502
+    assert len(llm.calls) == 2
 
 
 @pytest.mark.parametrize(
@@ -136,27 +173,29 @@ def test_chat_drops_leading_assistant_greeting(client: TestClient, claude: FakeC
     ],
 )
 def test_chat_rejects_invalid_request(
-    client: TestClient, claude: FakeClaude, overrides: dict[str, Any]
+    client: TestClient, llm: FakeDeepSeek, overrides: dict[str, Any]
 ) -> None:
     response = client.post("/api/chat", json=chat_body(**overrides))
 
     assert response.status_code == 422
-    assert claude.messages.calls == []
+    assert llm.calls == []
 
 
 @pytest.mark.parametrize(
-    ("stop_reason", "text", "status_code"),
+    ("finish_reason", "content", "status_code"),
     [
-        pytest.param("refusal", "", 422, id="refusal"),
-        pytest.param("max_tokens", '{"reply": "Сәл', 502, id="cut off"),
-        pytest.param("end_turn", "not json", 502, id="invalid json"),
-        pytest.param("end_turn", '{"reply": "no lists"}', 502, id="schema mismatch"),
+        pytest.param("content_filter", "", 422, id="content filter"),
+        pytest.param("length", '{"reply": "Сәл', 502, id="cut off"),
+        pytest.param("insufficient_system_resource", "", 503, id="deepseek overloaded"),
+        pytest.param("aborted", "", 502, id="aborted"),
+        pytest.param("stop", "not json", 502, id="invalid json"),
+        pytest.param("stop", '{"reply": "no lists"}', 502, id="schema mismatch"),
     ],
 )
-def test_chat_reports_unusable_claude_answer(
-    client: TestClient, claude: FakeClaude, stop_reason: str, text: str, status_code: int
+def test_chat_reports_unusable_answer(
+    client: TestClient, llm: FakeDeepSeek, finish_reason: str, content: str, status_code: int
 ) -> None:
-    claude.reply_with(text, stop_reason=stop_reason)
+    llm.reply_with(content, finish_reason=finish_reason)
 
     response = client.post("/api/chat", json=chat_body())
 
@@ -169,28 +208,33 @@ def test_chat_reports_unusable_claude_answer(
     ("error", "status_code"),
     [
         pytest.param(
-            anthropic.RateLimitError("slow down", response=api_response(429), body=None),
+            openai.RateLimitError("slow down", response=api_response(429), body=None),
             503,
             id="rate limited",
         ),
-        pytest.param(anthropic.APIConnectionError(request=api_request()), 503, id="no network"),
-        pytest.param(anthropic.APITimeoutError(request=api_request()), 503, id="timeout"),
+        pytest.param(openai.APIConnectionError(request=api_request()), 503, id="no network"),
+        pytest.param(openai.APITimeoutError(request=api_request()), 503, id="timeout"),
         pytest.param(
-            anthropic.AuthenticationError("bad key", response=api_response(401), body=None),
+            openai.APIStatusError("Insufficient Balance", response=api_response(402), body=None),
+            503,
+            id="balance is empty",
+        ),
+        pytest.param(
+            openai.AuthenticationError("bad key", response=api_response(401), body=None),
             500,
             id="bad api key",
         ),
         pytest.param(
-            anthropic.InternalServerError("boom", response=api_response(500), body=None),
+            openai.InternalServerError("boom", response=api_response(500), body=None),
             502,
-            id="anthropic outage",
+            id="deepseek outage",
         ),
     ],
 )
-def test_chat_maps_claude_api_errors(
-    client: TestClient, claude: FakeClaude, error: Exception, status_code: int
+def test_chat_maps_deepseek_api_errors(
+    client: TestClient, llm: FakeDeepSeek, error: Exception, status_code: int
 ) -> None:
-    claude.fail_with(error)
+    llm.fail_with(error)
 
     response = client.post("/api/chat", json=chat_body())
 

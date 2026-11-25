@@ -1,14 +1,12 @@
-"""Talks to Claude: the tutor chat and the translator."""
+"""Talks to DeepSeek: the tutor chat and the translator."""
 
 import logging
 from collections.abc import Sequence
-from functools import cache
-from typing import Literal
 
-import anthropic
-from anthropic import AsyncAnthropic, transform_schema
-from anthropic.types import JSONOutputFormatParam, Message, MessageParam
-from pydantic import BaseModel, Field, ValidationError
+import openai
+from openai import AsyncOpenAI
+from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
+from pydantic import BaseModel, ValidationError
 
 from app.prompts import TRANSLATE_SYSTEM, chat_system_prompt, translate_user_message
 from app.schemas import (
@@ -23,13 +21,15 @@ from app.schemas import (
 
 logger = logging.getLogger(__name__)
 
-# Only the recent part of the dialogue goes to Claude: enough context for a lesson,
+# Only the recent part of the dialogue goes to the model: enough context for a lesson,
 # while long sessions stay fast and cheap.
 MAX_HISTORY_MESSAGES = 30
-# Room for adaptive thinking plus the JSON answer.
-MAX_OUTPUT_TOKENS = 16000
-
-Effort = Literal["low", "medium", "high"]
+# Answers are short JSON objects; the cap only guards against runaway output.
+MAX_OUTPUT_TOKENS = 4096
+# DeepSeek's recommended temperature for conversation and translation.
+TEMPERATURE = 1.3
+# DeepSeek JSON mode sometimes returns blank content; its docs say to retry.
+ATTEMPTS_ON_BLANK_CONTENT = 2
 
 
 class TutorError(Exception):
@@ -41,8 +41,8 @@ class TutorError(Exception):
         self.message = message
 
 
-# What Claude must return. Every field is required so the structured output is fully
-# specified; empty strings and lists mean "nothing to add".
+# What the model must return. DeepSeek JSON mode does not enforce a schema, so every answer
+# is validated against these models; empty strings and lists mean "nothing to add".
 class _DraftWord(BaseModel):
     kk: str
     en: str
@@ -57,16 +57,11 @@ class _ChatDraft(BaseModel):
 
 class _TranslationDraft(BaseModel):
     translation: str
-    transliteration: str = Field(description="Empty string unless the target is Kazakh.")
-    notes: str = Field(description="Empty string when there is nothing useful to add.")
+    transliteration: str
+    notes: str
 
 
-@cache
-def _json_format(model: type[BaseModel]) -> JSONOutputFormatParam:
-    return {"type": "json_schema", "schema": transform_schema(model)}
-
-
-def recent_dialogue(messages: Sequence[ChatMessage]) -> list[MessageParam]:
+def recent_dialogue(messages: Sequence[ChatMessage]) -> list[ChatCompletionMessageParam]:
     """The last MAX_HISTORY_MESSAGES messages, trimmed so the dialogue starts with the student."""
     recent = list(messages[-MAX_HISTORY_MESSAGES:])
     while recent and recent[0].role != "user":
@@ -74,14 +69,14 @@ def recent_dialogue(messages: Sequence[ChatMessage]) -> list[MessageParam]:
     return [_to_message_param(message) for message in recent]
 
 
-def _to_message_param(message: ChatMessage) -> MessageParam:
+def _to_message_param(message: ChatMessage) -> ChatCompletionMessageParam:
     if message.role == "user":
         return {"role": "user", "content": message.content}
     return {"role": "assistant", "content": message.content}
 
 
 class Tutor:
-    def __init__(self, client: AsyncAnthropic, model: str) -> None:
+    def __init__(self, client: AsyncOpenAI, model: str) -> None:
         self._client = client
         self._model = model
 
@@ -90,7 +85,6 @@ class Tutor:
             system=chat_system_prompt(request.level, request.topic),
             messages=recent_dialogue(request.messages),
             output=_ChatDraft,
-            effort="medium",
         )
         return ChatResponse(
             reply=answer.reply,
@@ -104,7 +98,6 @@ class Tutor:
             system=TRANSLATE_SYSTEM,
             messages=[{"role": "user", "content": prompt}],
             output=_TranslationDraft,
-            effort="low",
         )
         return TranslateResponse(
             translation=answer.translation,
@@ -116,54 +109,72 @@ class Tutor:
         self,
         *,
         system: str,
-        messages: list[MessageParam],
+        messages: list[ChatCompletionMessageParam],
         output: type[Answer],
-        effort: Effort,
     ) -> Answer:
-        """Sends one request and returns Claude's answer validated against `output`."""
-        response = await self._create(
-            system=system, messages=messages, output_format=_json_format(output), effort=effort
-        )
+        """Sends the request and returns the model's answer validated against `output`."""
+        conversation: list[ChatCompletionMessageParam] = [
+            {"role": "system", "content": system},
+            *messages,
+        ]
+        for _ in range(ATTEMPTS_ON_BLANK_CONTENT):
+            content = await self._complete(conversation)
+            if content.strip():
+                break
+            logger.warning("DeepSeek returned blank content")
+        else:
+            raise TutorError(502, "The tutor sent an empty answer. Try again.")
 
-        if response.stop_reason == "refusal":
-            logger.warning("Claude declined request %s: %s", response.id, response.stop_details)
-            raise TutorError(422, "The tutor can't help with this request. Try rephrasing it.")
-        if response.stop_reason != "end_turn":
-            logger.error("Claude stopped early (%s) on %s", response.stop_reason, response.id)
-            raise TutorError(502, "The answer was cut off. Try a shorter message.")
-
-        # With adaptive thinking the answer is not the first block: pick it by type.
-        text = next((block.text for block in response.content if block.type == "text"), "")
         try:
-            return output.model_validate_json(text)
+            return output.model_validate_json(content)
         except ValidationError as error:
-            logger.error("Claude answer %s does not match the schema: %s", response.id, error)
+            logger.error("DeepSeek answer does not match the expected JSON: %s", error)
             raise TutorError(502, "The tutor sent a broken answer. Try again.") from error
 
-    async def _create(
-        self,
-        *,
-        system: str,
-        messages: list[MessageParam],
-        output_format: JSONOutputFormatParam,
-        effort: Effort,
-    ) -> Message:
+    async def _complete(self, conversation: list[ChatCompletionMessageParam]) -> str:
+        """Returns the text of one complete answer, or raises TutorError."""
+        completion = await self._create(conversation)
+        if not completion.choices:
+            logger.error("DeepSeek returned no choices on %s", completion.id)
+            raise TutorError(502, "The tutor sent an empty answer. Try again.")
+        choice = completion.choices[0]
+        # DeepSeek adds finish reasons the OpenAI types do not list, so compare plain strings.
+        finish_reason: str = choice.finish_reason
+
+        if finish_reason == "content_filter":
+            logger.warning("DeepSeek filtered the answer to %s", completion.id)
+            raise TutorError(422, "The tutor can't help with this request. Try rephrasing it.")
+        if finish_reason == "insufficient_system_resource":
+            raise TutorError(503, "The tutor is busy right now. Try again in a minute.")
+        if finish_reason != "stop":
+            logger.error("DeepSeek stopped early (%s) on %s", finish_reason, completion.id)
+            raise TutorError(502, "The answer was cut off. Try a shorter message.")
+        return choice.message.content or ""
+
+    async def _create(self, conversation: list[ChatCompletionMessageParam]) -> ChatCompletion:
         try:
-            return await self._client.messages.create(
+            return await self._client.chat.completions.create(
                 model=self._model,
+                messages=conversation,
+                response_format={"type": "json_object"},
                 max_tokens=MAX_OUTPUT_TOKENS,
-                system=system,
-                messages=messages,
-                output_config={"effort": effort, "format": output_format},
+                temperature=TEMPERATURE,
+                # Non-thinking mode: answers come back in a few seconds.
+                extra_body={"thinking": {"type": "disabled"}},
             )
-        except (anthropic.RateLimitError, anthropic.APIConnectionError) as error:
-            logger.warning("Claude unavailable: %r", error)
+        except (openai.RateLimitError, openai.APIConnectionError) as error:
+            logger.warning("DeepSeek unavailable: %r", error)
             raise TutorError(503, "The tutor is busy right now. Try again in a minute.") from error
-        except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as error:
-            logger.error("Claude rejected the backend credentials: %r", error)
+        except (openai.AuthenticationError, openai.PermissionDeniedError) as error:
+            logger.error("DeepSeek rejected the backend API key: %r", error)
             raise TutorError(
-                500, "The backend is misconfigured: check ANTHROPIC_API_KEY."
+                500, "The backend is misconfigured: check DEEPSEEK_API_KEY."
             ) from error
-        except anthropic.APIStatusError as error:
-            logger.error("Claude API error %s: %r", error.status_code, error)
+        except openai.APIStatusError as error:
+            if error.status_code == 402:
+                logger.error("DeepSeek balance is empty: top up the account")
+                raise TutorError(
+                    503, "The tutor is unavailable: the AI service balance is empty."
+                ) from error
+            logger.error("DeepSeek API error %s: %r", error.status_code, error)
             raise TutorError(502, "The AI service returned an error. Try again.") from error

@@ -3,39 +3,40 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from anthropic import AsyncAnthropic
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
+from openai import AsyncOpenAI
 
 from app.config import Settings
 from app.schemas import ChatRequest, ChatResponse, TranslateRequest, TranslateResponse
 from app.tutor import Tutor, TutorError
 
 
-def _anthropic_client(settings: Settings) -> AsyncAnthropic:
-    api_key = settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None
-    client = AsyncAnthropic(api_key=api_key, timeout=settings.request_timeout_seconds)
-    # Without credentials the SDK fails only on the first request, so stop at startup instead.
-    if client.api_key is None and client.auth_token is None and client.credentials is None:
+def _deepseek_client(settings: Settings) -> AsyncOpenAI:
+    # The key is always passed explicitly: the OpenAI SDK would otherwise fall back to
+    # OPENAI_API_KEY and send it to DeepSeek.
+    if settings.deepseek_api_key is None:
         raise RuntimeError(
-            "No Anthropic credentials: set ANTHROPIC_API_KEY in back/.env (see .env.example)."
+            "No DeepSeek API key: set DEEPSEEK_API_KEY in back/.env (see .env.example)."
         )
-    return client
+    return AsyncOpenAI(
+        api_key=settings.deepseek_api_key.get_secret_value(),
+        base_url=settings.deepseek_base_url,
+        timeout=settings.request_timeout_seconds,
+    )
 
 
-def create_app(
-    settings: Settings | None = None, anthropic_client: AsyncAnthropic | None = None
-) -> FastAPI:
-    """Builds the app. Tests pass their own settings and a fake Anthropic client."""
+def create_app(settings: Settings | None = None, llm_client: AsyncOpenAI | None = None) -> FastAPI:
+    """Builds the app. Tests pass their own settings and a fake DeepSeek client."""
     settings = settings or Settings()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        client = anthropic_client or _anthropic_client(settings)
-        app.state.tutor = Tutor(client, settings.claude_model)
+        client = llm_client or _deepseek_client(settings)
+        app.state.tutor = Tutor(client, settings.deepseek_model)
         yield
-        if anthropic_client is None:
+        if llm_client is None:
             await client.close()
 
     app = FastAPI(title="BilimAI backend", lifespan=lifespan)
