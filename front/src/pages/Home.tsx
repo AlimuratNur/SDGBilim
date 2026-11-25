@@ -24,7 +24,7 @@ export function Home() {
         <div className="container hero-inner">
           <div className="hero-copy">
             <h1 lang="kk">Қазақша сөйлейік.</h1>
-            <p className="hero-en">Let&apos;s speak Kazakh.</p>
+            <p className="hero-en">Let’s speak Kazakh.</p>
             <p className="lead">
               An AI tutor that talks with you at your level, corrects every mistake and explains the rule behind it. Free
               for every student, at any hour.

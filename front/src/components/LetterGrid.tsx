@@ -17,7 +17,7 @@ export function LetterGrid() {
   return (
     <figure className="letters">
       <p className="letters-label" id="letters-label">
-        9 letters you won&apos;t find in Russian
+        9 letters you won’t find in Russian
       </p>
       <div className="letters-grid" role="group" aria-labelledby="letters-label">
         {letterWords.map((w, i) => (
