@@ -56,12 +56,33 @@ Two Vercel projects in the `dorhsis-projects` scope, one per folder:
 sends every path to `index.html` so links like `/tutor` work. `.vercelignore` keeps `.env` files
 and tests out of the upload.
 
-Deploy from the folder you changed:
+### Automatic deploys
+
+Every push to `main` runs a GitHub Actions workflow for the folder that changed:
+[`deploy-back.yml`](../.github/workflows/deploy-back.yml) for `back/`,
+[`deploy-front.yml`](../.github/workflows/deploy-front.yml) for `front/`. Each one runs the
+lint, type checks, tests and build, and deploys to Vercel production only if they pass. Both can also be
+started by hand from the Actions tab (Run workflow).
+
+One-time setup (the Vercel GitHub app cannot be used: the Vercel account and the repository
+belong to different GitHub users):
+
+1. The owner of the Vercel account creates a token at
+   [vercel.com/account/settings/tokens](https://vercel.com/account/settings/tokens),
+   scope `dorhsis' projects`.
+2. The repository owner adds it on GitHub: Settings → Secrets and variables → Actions →
+   New repository secret, name `VERCEL_TOKEN`.
+
+Until the secret exists, the workflows still run the checks and skip the deploy with a warning.
+
+### Manual deploys
 
 ```bash
 cd back && npx vercel@latest deploy --prod
 cd front && npx vercel@latest deploy --prod
 ```
+
+### Secrets
 
 The API key is set once in Vercel, never committed:
 

@@ -1,0 +1,58 @@
+# Checks front/ and deploys it to the Vercel project sdgbilim on every push to main
+# that changes front/. Setup: back/README.md, section "Deploy (Vercel)".
+name: Deploy frontend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "front/**"
+      - ".github/workflows/deploy-front.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-front
+  cancel-in-progress: false
+
+jobs:
+  check-and-deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: front
+    env:
+      # Not secrets: they only name the Vercel team and project.
+      VERCEL_ORG_ID: team_0IekTq7aTmZhZx4ariEwEv6N
+      VERCEL_PROJECT_ID: prj_rlB2g76YSNiSvjAvzjo4qy3DgCWY
+      HAS_VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: front/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      # Vercel builds again on its side with the production VITE_API_URL.
+      - name: Deploy to Vercel (production)
+        if: env.HAS_VERCEL_TOKEN == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: npx --yes vercel@66 deploy --prod --yes --token="$VERCEL_TOKEN"
+
+      - name: Report skipped deploy
+        if: env.HAS_VERCEL_TOKEN != 'true'
+        run: echo "::warning::The VERCEL_TOKEN repository secret is not set, so the deploy was skipped. See back/README.md, section Deploy (Vercel)."
