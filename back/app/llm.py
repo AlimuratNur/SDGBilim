@@ -36,6 +36,9 @@ BAD_MODEL = "The backend is misconfigured: check LLM_MODEL."
 NO_BALANCE = "The tutor is unavailable: the AI service balance is empty."
 PROVIDER_ERROR = "The AI service returned an error. Try again."
 
+# "Overloaded": 503 on OpenAI-compatible APIs (Gemini, Meta...), 529 on Anthropic.
+OVERLOADED_STATUSES = frozenset({503, 529})
+
 
 @dataclass(frozen=True)
 class Turn:
@@ -138,6 +141,9 @@ class AnthropicLLM:
             logger.error("Claude does not know model %s: %r", self._model, error)
             raise TutorError(500, BAD_MODEL) from error
         except anthropic.APIStatusError as error:
+            if error.status_code in OVERLOADED_STATUSES:
+                logger.warning("Claude is overloaded: %r", error)
+                raise TutorError(503, BUSY) from error
             logger.error("Claude API error %s: %r", error.status_code, error)
             raise TutorError(502, PROVIDER_ERROR) from error
 
@@ -239,5 +245,8 @@ class OpenAICompatibleLLM:
             if error.status_code == 402:
                 logger.error("The LLM account balance is empty: top it up")
                 raise TutorError(503, NO_BALANCE) from error
+            if error.status_code in OVERLOADED_STATUSES:
+                logger.warning("The LLM API is overloaded: %r", error)
+                raise TutorError(503, BUSY) from error
             logger.error("LLM API error %s: %r", error.status_code, error)
             raise TutorError(502, PROVIDER_ERROR) from error

@@ -242,6 +242,11 @@ def test_chat_reports_model_refusal(client: TestClient, llm: FakeOpenAI) -> None
             502,
             id="provider outage",
         ),
+        pytest.param(
+            openai.InternalServerError("overloaded", response=api_response(503), body=None),
+            503,
+            id="provider overloaded",
+        ),
     ],
 )
 def test_chat_maps_llm_api_errors(

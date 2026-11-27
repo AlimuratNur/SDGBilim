@@ -52,8 +52,13 @@ Two Vercel projects in the `dorhsis-projects` scope, one per folder:
 
 | Folder   | Vercel project | Production URL                      | Env vars (Production)                    |
 | -------- | -------------- | ----------------------------------- | ---------------------------------------- |
-| `back/`  | `sdgbilim-api` | https://sdgbilim-api.vercel.app     | `LLM_PROVIDER`, `LLM_API_KEY`, `CORS_ORIGINS` |
+| `back/`  | `sdgbilim-api` | https://sdgbilim-api.vercel.app     | `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, `CORS_ORIGINS` |
 | `front/` | `sdgbilim`     | https://sdgbilim.vercel.app         | `VITE_API_URL=https://sdgbilim-api.vercel.app` |
+
+Production currently runs on **Gemini** through its OpenAI-compatible API (`LLM_PROVIDER`
+unset, so `openai`; `LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/`;
+`LLM_MODEL=gemini-3.5-flash-lite`) with a free AI Studio key. `gemini-3.8-flash` answered 503
+(overloaded) on the free tier, so the Flash-Lite model is used.
 
 `vercel.json` in each folder pins the framework (`fastapi`, `vite`); `front/vercel.json` also
 sends every path to `index.html` so links like `/tutor` work. `.vercelignore` keeps `.env` files
@@ -115,7 +120,7 @@ Errors:
 | 422    | Invalid request, or the model declined to answer                    | JSON details / text    |
 | 500    | The API key or the model name is wrong                               | text for the student   |
 | 502    | The model returned an error, a cut-off, empty or broken answer       | text for the student   |
-| 503    | Rate limit, timeout, no network or empty account balance            | text for the student   |
+| 503    | Rate limit, provider overloaded, timeout, no network, empty balance | text for the student   |
 
 The frontend shows the body of an error response to the student, so tutor errors are plain text.
 

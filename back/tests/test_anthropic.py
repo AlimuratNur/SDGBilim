@@ -120,6 +120,11 @@ def test_chat_on_claude_reports_unusable_answer(
             502,
             id="anthropic outage",
         ),
+        pytest.param(
+            anthropic.OverloadedError("overloaded", response=api_response(529), body=None),
+            503,
+            id="anthropic overloaded",
+        ),
     ],
 )
 def test_chat_on_claude_maps_api_errors(

@@ -40,7 +40,6 @@ export function Layout() {
       <footer className="footer">
         <div className="container footer-inner">
           <span>BilimAI · SDG KBTU Hackathon 2026 · SDG 4 Quality Education</span>
-          <span>Powered by Meta Muse</span>
         </div>
       </footer>
     </div>
