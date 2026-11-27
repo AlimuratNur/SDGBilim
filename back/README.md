@@ -1,11 +1,13 @@
 # BilimAI — backend
 
 FastAPI server for the Kazakh-language AI tutor (SDG KBTU Hackathon, SDG 4).
-It holds the LLM API key (Meta Model API) and answers the frontend in `front/`.
+It holds the LLM API key and answers the frontend in `front/`. The model is Claude or any
+OpenAI-compatible API (Meta Model API by default), picked by `LLM_PROVIDER`.
 
 ## Run
 
-Needs [uv](https://docs.astral.sh/uv/) and a [Meta Model API key](https://dev.meta.ai/).
+Needs [uv](https://docs.astral.sh/uv/) and an API key: [Claude](https://platform.claude.com/settings/keys)
+or an OpenAI-compatible provider such as the [Meta Model API](https://dev.meta.ai/).
 
 ```bash
 cp .env.example .env    # then put your key into LLM_API_KEY
@@ -37,9 +39,10 @@ Read from environment variables or `back/.env` (git-ignored).
 
 | Variable                  | Default                 | What it does                              |
 | ------------------------- | ----------------------- | ----------------------------------------- |
-| `LLM_API_KEY`             | —                       | Meta Model API key. Required.             |
-| `LLM_MODEL`               | `muse-spark-1.3`        | Model for the tutor and the translator.   |
-| `LLM_BASE_URL`            | `https://api.meta.ai/v1` | Any OpenAI-compatible chat API.          |
+| `LLM_PROVIDER`            | `openai`                | `anthropic` (Claude) or `openai` (any OpenAI-compatible API). |
+| `LLM_API_KEY`             | —                       | Key of that provider. Required.           |
+| `LLM_MODEL`               | per provider            | `claude-haiku-5-5` / `muse-spark-1.3`.    |
+| `LLM_BASE_URL`            | per provider            | Anthropic's endpoint / `https://api.meta.ai/v1`. |
 | `CORS_ORIGINS`            | `http://localhost:5173` | Comma-separated frontend origins.         |
 | `REQUEST_TIMEOUT_SECONDS` | `60`                    | Timeout for one model request.            |
 
@@ -49,7 +52,7 @@ Two Vercel projects in the `dorhsis-projects` scope, one per folder:
 
 | Folder   | Vercel project | Production URL                      | Env vars (Production)                    |
 | -------- | -------------- | ----------------------------------- | ---------------------------------------- |
-| `back/`  | `sdgbilim-api` | https://sdgbilim-api.vercel.app     | `LLM_API_KEY`, `CORS_ORIGINS`            |
+| `back/`  | `sdgbilim-api` | https://sdgbilim-api.vercel.app     | `LLM_PROVIDER`, `LLM_API_KEY`, `CORS_ORIGINS` |
 | `front/` | `sdgbilim`     | https://sdgbilim.vercel.app         | `VITE_API_URL=https://sdgbilim-api.vercel.app` |
 
 `vercel.json` in each folder pins the framework (`fastapi`, `vite`); `front/vercel.json` also
@@ -120,23 +123,26 @@ The frontend shows the body of an error response to the student, so tutor errors
 
 ```
 app/
-  main.py      FastAPI app: routes, CORS, error handler, LLM client
+  main.py      FastAPI app: routes, CORS, error handler
   schemas.py   HTTP contract (mirror of front/src/api/types.ts)
-  tutor.py     Model calls: chat and translate, error mapping
+  tutor.py     Chat and translate: prompts, history, answer shape
+  llm.py       LLM clients (Claude, OpenAI-compatible): JSON schema, stop reasons, errors
   prompts.py   System prompts, levels and topics
   config.py    Settings from env / .env
-tests/         API tests with a fake LLM client
+tests/         API tests with fake Anthropic and OpenAI SDKs
 ```
 
-- The model is called through the OpenAI SDK with `LLM_BASE_URL`, by default the
-  [Meta Model API](https://dev.meta.ai/docs) and `muse-spark-1.3`. Any OpenAI-compatible
-  provider with JSON-schema output works by changing the three `LLM_*` variables.
-- Each request sends a strict [JSON schema](https://dev.meta.ai/docs/structured-output) built
-  from Pydantic models, and every answer is validated against it. `finish_reason` and
-  `refusal` are checked first: a declined or cut-off answer becomes a clear error.
-  Blank content is retried once.
+- `LLM_PROVIDER=anthropic` calls Claude through the Anthropic SDK with
+  [structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs);
+  `stop_reason` is checked before the JSON is read. `LLM_PROVIDER=openai` calls any
+  OpenAI-compatible API through the OpenAI SDK with a strict `json_schema` response format;
+  `finish_reason` and `refusal` are checked first, and blank content is retried once.
+- Both send the JSON schema of the answer's Pydantic model and validate the answer against it.
+  A declined, cut-off or broken answer becomes a clear error for the student.
+- Switching provider is configuration only: set `LLM_PROVIDER` and `LLM_API_KEY` (and, if
+  needed, `LLM_MODEL` / `LLM_BASE_URL`) in Vercel and redeploy.
 - Chat sends only the last 30 messages of the dialogue, so long lessons stay fast and cheap.
-- The key is always passed explicitly, so an `OPENAI_API_KEY` from the environment is never
-  sent to the provider.
+- The key is always passed explicitly, so `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` from the
+  environment are never read or sent to another provider.
 - The text to translate is wrapped in `<text>` tags, and the prompt tells the model never to
   follow instructions inside it.

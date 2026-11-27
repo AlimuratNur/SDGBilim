@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.tutor import MAX_HISTORY_MESSAGES
-from tests.conftest import TEST_MODEL, FakeLLM, api_request, api_response
+from tests.conftest import TEST_MODEL, FakeOpenAI, api_request, api_response
 
 EMPTY_ANSWER = {"reply": "Сәлем!", "corrections": [], "new_words": []}
 
@@ -19,7 +19,7 @@ def chat_body(**overrides: Any) -> dict[str, Any]:
     return body | overrides
 
 
-def test_chat_returns_reply_corrections_and_new_words(client: TestClient, llm: FakeLLM) -> None:
+def test_chat_returns_reply_corrections_and_new_words(client: TestClient, llm: FakeOpenAI) -> None:
     llm.reply_with(
         {
             "reply": "Жақсы талпыныс! (Good try!) **Сен қайдансың?**",
@@ -51,7 +51,7 @@ def test_chat_returns_reply_corrections_and_new_words(client: TestClient, llm: F
 
 
 def test_chat_omits_missing_russian_translation_of_new_word(
-    client: TestClient, llm: FakeLLM
+    client: TestClient, llm: FakeOpenAI
 ) -> None:
     llm.reply_with(
         {"reply": "Сәлем!", "corrections": [], "new_words": [{"kk": "су", "en": "water", "ru": ""}]}
@@ -63,7 +63,7 @@ def test_chat_omits_missing_russian_translation_of_new_word(
 
 
 def test_chat_sends_system_prompt_and_dialogue_to_the_model(
-    client: TestClient, llm: FakeLLM
+    client: TestClient, llm: FakeOpenAI
 ) -> None:
     llm.reply_with(EMPTY_ANSWER)
     dialogue = [
@@ -83,7 +83,9 @@ def test_chat_sends_system_prompt_and_dialogue_to_the_model(
     assert sent == dialogue
 
 
-def test_chat_asks_for_an_answer_matching_the_json_schema(client: TestClient, llm: FakeLLM) -> None:
+def test_chat_asks_for_an_answer_matching_the_json_schema(
+    client: TestClient, llm: FakeOpenAI
+) -> None:
     llm.reply_with(EMPTY_ANSWER)
 
     client.post("/api/chat", json=chat_body())
@@ -95,7 +97,7 @@ def test_chat_asks_for_an_answer_matching_the_json_schema(client: TestClient, ll
     assert schema["additionalProperties"] is False
 
 
-def test_chat_without_topic_is_free_conversation(client: TestClient, llm: FakeLLM) -> None:
+def test_chat_without_topic_is_free_conversation(client: TestClient, llm: FakeOpenAI) -> None:
     llm.reply_with(EMPTY_ANSWER)
 
     response = client.post("/api/chat", json=chat_body(topic=None))
@@ -105,7 +107,7 @@ def test_chat_without_topic_is_free_conversation(client: TestClient, llm: FakeLL
 
 
 def test_chat_sends_only_recent_history_starting_with_user(
-    client: TestClient, llm: FakeLLM
+    client: TestClient, llm: FakeOpenAI
 ) -> None:
     llm.reply_with(EMPTY_ANSWER)
     dialogue = [{"role": "assistant", "content": "Сәлем! I am your tutor."}]
@@ -123,7 +125,7 @@ def test_chat_sends_only_recent_history_starting_with_user(
     assert sent == dialogue[-len(sent) :]
 
 
-def test_chat_drops_leading_assistant_greeting(client: TestClient, llm: FakeLLM) -> None:
+def test_chat_drops_leading_assistant_greeting(client: TestClient, llm: FakeOpenAI) -> None:
     llm.reply_with(EMPTY_ANSWER)
     dialogue = [
         {"role": "assistant", "content": "Сәлем! I am your tutor."},
@@ -136,7 +138,7 @@ def test_chat_drops_leading_assistant_greeting(client: TestClient, llm: FakeLLM)
 
 
 def test_chat_retries_once_when_the_model_returns_blank_content(
-    client: TestClient, llm: FakeLLM
+    client: TestClient, llm: FakeOpenAI
 ) -> None:
     llm.reply_with("   ")
     llm.reply_with(EMPTY_ANSWER)
@@ -148,7 +150,7 @@ def test_chat_retries_once_when_the_model_returns_blank_content(
     assert len(llm.calls) == 2
 
 
-def test_chat_gives_up_when_content_stays_blank(client: TestClient, llm: FakeLLM) -> None:
+def test_chat_gives_up_when_content_stays_blank(client: TestClient, llm: FakeOpenAI) -> None:
     llm.reply_with("   ")
 
     response = client.post("/api/chat", json=chat_body())
@@ -171,7 +173,7 @@ def test_chat_gives_up_when_content_stays_blank(client: TestClient, llm: FakeLLM
     ],
 )
 def test_chat_rejects_invalid_request(
-    client: TestClient, llm: FakeLLM, overrides: dict[str, Any]
+    client: TestClient, llm: FakeOpenAI, overrides: dict[str, Any]
 ) -> None:
     response = client.post("/api/chat", json=chat_body(**overrides))
 
@@ -190,7 +192,7 @@ def test_chat_rejects_invalid_request(
     ],
 )
 def test_chat_reports_unusable_answer(
-    client: TestClient, llm: FakeLLM, finish_reason: str, content: str, status_code: int
+    client: TestClient, llm: FakeOpenAI, finish_reason: str, content: str, status_code: int
 ) -> None:
     llm.reply_with(content, finish_reason=finish_reason)
 
@@ -201,7 +203,7 @@ def test_chat_reports_unusable_answer(
     assert response.text
 
 
-def test_chat_reports_model_refusal(client: TestClient, llm: FakeLLM) -> None:
+def test_chat_reports_model_refusal(client: TestClient, llm: FakeOpenAI) -> None:
     llm.reply_with("", refusal="I can't help with that.")
 
     response = client.post("/api/chat", json=chat_body())
@@ -243,7 +245,7 @@ def test_chat_reports_model_refusal(client: TestClient, llm: FakeLLM) -> None:
     ],
 )
 def test_chat_maps_llm_api_errors(
-    client: TestClient, llm: FakeLLM, error: Exception, status_code: int
+    client: TestClient, llm: FakeOpenAI, error: Exception, status_code: int
 ) -> None:
     llm.fail_with(error)
 

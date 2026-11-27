@@ -3,7 +3,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.conftest import FakeLLM
+from tests.conftest import FakeOpenAI
 
 
 def translate_body(**overrides: Any) -> dict[str, Any]:
@@ -12,7 +12,7 @@ def translate_body(**overrides: Any) -> dict[str, Any]:
 
 
 def test_translate_returns_translation_with_transliteration_and_notes(
-    client: TestClient, llm: FakeLLM
+    client: TestClient, llm: FakeOpenAI
 ) -> None:
     llm.reply_with(
         {
@@ -32,7 +32,9 @@ def test_translate_returns_translation_with_transliteration_and_notes(
     }
 
 
-def test_translate_omits_empty_transliteration_and_notes(client: TestClient, llm: FakeLLM) -> None:
+def test_translate_omits_empty_transliteration_and_notes(
+    client: TestClient, llm: FakeOpenAI
+) -> None:
     llm.reply_with({"translation": "Спасибо", "transliteration": "", "notes": ""})
 
     response = client.post("/api/translate", json=translate_body(to="ru"))
@@ -41,7 +43,7 @@ def test_translate_omits_empty_transliteration_and_notes(client: TestClient, llm
 
 
 def test_translate_sends_text_and_language_pair_to_the_model(
-    client: TestClient, llm: FakeLLM
+    client: TestClient, llm: FakeOpenAI
 ) -> None:
     llm.reply_with({"translation": "Hello", "transliteration": "", "notes": ""})
 
@@ -72,7 +74,7 @@ def test_translate_sends_text_and_language_pair_to_the_model(
     ],
 )
 def test_translate_rejects_invalid_request(
-    client: TestClient, llm: FakeLLM, overrides: dict[str, Any]
+    client: TestClient, llm: FakeOpenAI, overrides: dict[str, Any]
 ) -> None:
     response = client.post("/api/translate", json=translate_body(**overrides))
 
@@ -80,7 +82,7 @@ def test_translate_rejects_invalid_request(
     assert llm.calls == []
 
 
-def test_translate_reports_content_filter(client: TestClient, llm: FakeLLM) -> None:
+def test_translate_reports_content_filter(client: TestClient, llm: FakeOpenAI) -> None:
     llm.reply_with("", finish_reason="content_filter")
 
     response = client.post("/api/translate", json=translate_body())
